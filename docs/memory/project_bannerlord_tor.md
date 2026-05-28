@@ -116,7 +116,7 @@ Harmony **всегда** выше Native — иначе патчи не нака
   4. `Behaviors/SmartFoodTraderBehavior.cs` — **CampaignBehavior**, hook на `CampaignEvents.SettlementEntered`. При входе MainParty в Town/Village докупает food до 10 дней / продаёт излишек выше 15 дней. Использует `party.FoodChange`, `settlement.Town.GetItemPrice`, прямые ItemRoster + `GiveGoldAction.ApplyBetweenCharacters`. Сохраняет минимум 1 единицу каждого food-типа для морал-бафа. Цены: buy ≤ 1.5× value, sell ≥ 0.7× value.
 - **Раньше был** `CivilianWindsRegenPatch.cs` (swap источника `WindsOfMagicRegen` трейтов на civilian) — удалён, потому что трейты на магический реген обычно лежат именно на боевой экипировке.
 
-### Планируемые доработки (см. `C:\Users\Admin\RiderProjects\mb2-old-realm-qols\SPEC_SmartFoodTrader.md`)
+### Планируемые доработки (см. `docs/spec/SPEC_SmartFoodTrader.md` в этом же repo)
 
 - **Livestock-логика:** sell-as-livestock vs butcher через `HorseComponent.MeatCount/HideCount`. Native Butcher API в Bannerlord НЕТ — реализуем вручную через `ItemRoster.AddToCounts(livestock, -1)` + добавление meat/hides items. Canonical item IDs `"meat"`, `"hides"`. Выбор max(benefit_sell, benefit_butcher) с учётом food-deficit.
 - **Horse/Mule управление при входе settlement:** target_warhorses = `unmounted_infantry × 1.15`, target_mules = `totalMen × 0.45`, reserve_for_loot = `totalMen × 0.40`. Только продажа lame/sick (модификатор `lame_horse`), не докупаем. Красное сообщение если warhorses < unmounted_infantry. Wounded учитываются (formula based on `NumberOfMenWithoutHorse` который включает раненых).
