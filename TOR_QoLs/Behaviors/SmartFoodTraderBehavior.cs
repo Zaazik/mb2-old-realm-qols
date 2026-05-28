@@ -24,8 +24,12 @@ namespace TOR_QoLs.Behaviors
         // Food
         private const float FoodMinDays = 10f;
         private const float FoodMaxDays = 15f;
-        private const float BuyPriceCap = 1.5f;
-        private const float SellPriceFloor = 0.7f;
+        // TESTING: цена-фильтры временно отключены (см. docs/issues.md #4).
+        // Изначально были BuyPriceCap=1.5 / SellPriceFloor=0.7, но TOR-овский
+        // TORTradeItemPriceFactorModel занижает sell-цены на equipment до 50%
+        // при низком Trade skill, и наш фильтр 0.7 мог отсекать всё.
+        private const float BuyPriceCap = 999f;   // effectively disabled
+        private const float SellPriceFloor = 0f;   // effectively disabled
 
         // Horses/Mules
         private const float WarhorseBufferPct = 0.15f;   // target_warhorses = unmounted × (1 + 0.15)
