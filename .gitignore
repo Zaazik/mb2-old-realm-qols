@@ -1,0 +1,15 @@
+# Build artifacts
+bin/
+obj/
+*.dll
+*.pdb
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+
+# Misc
+*.bak
+*.tmp

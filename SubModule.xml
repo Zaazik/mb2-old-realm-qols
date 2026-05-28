@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Module>
+    <Name value="TOR QoLs" />
+    <Id value="TOR_QoLs" />
+    <Version value="v1.0.0" />
+    <DefaultModule value="false" />
+    <ModuleCategory value="Singleplayer" />
+    <Official value="false" />
+    <DependedModules>
+        <DependedModule Id="Native" DependentVersion="v1.3.15" order="LoadAfterThis" />
+        <DependedModule Id="Bannerlord.Harmony" DependentVersion="v2.4.2" order="LoadAfterThis" />
+        <DependedModule Id="TOR_Core" DependentVersion="v1.3.15" order="LoadAfterThis" />
+    </DependedModules>
+    <SubModules>
+        <SubModule>
+            <Name value="TOR QoLs" />
+            <DLLName value="TOR_QoLs.dll" />
+            <SubModuleClassType value="TOR_QoLs.SubModule" />
+            <Tags />
+        </SubModule>
+    </SubModules>
+</Module>

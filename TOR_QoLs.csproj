@@ -1,0 +1,82 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <AssemblyName>TOR_QoLs</AssemblyName>
+    <RootNamespace>TOR_QoLs</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Deterministic>false</Deterministic>
+    <!-- Базовая версия. Patch-номер автоматом из текущего unix-времени, чтобы каждый билд имел свой ID. -->
+    <VersionPrefix>1.0</VersionPrefix>
+    <BuildStamp>$([System.DateTime]::UtcNow.ToString(`yyMMdd.HHmm`))</BuildStamp>
+    <Version>$(VersionPrefix).$(BuildStamp)</Version>
+    <AssemblyVersion>$(VersionPrefix).0.0</AssemblyVersion>
+    <FileVersion>$(VersionPrefix).0.0</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+
+    <!-- Корни -->
+    <GameDir>D:\SteamLibrary\steamapps\common\Mount &amp; Blade II Bannerlord</GameDir>
+    <GameBin>$(GameDir)\bin\Win64_Shipping_Client</GameBin>
+    <ModuleDir>$(GameDir)\Modules\TOR_QoLs</ModuleDir>
+
+    <!-- DLL TOR_Core тянем из клона репо (бин лежит в репе) -->
+    <TORCoreBin>D:\tmp\TOR_Core\bin\Win64_Shipping_Client</TORCoreBin>
+
+    <!-- Билд кладёт DLL сразу в Modules\<mod>\bin\Win64_Shipping_Client -->
+    <OutputPath>$(ModuleDir)\bin\Win64_Shipping_Client\</OutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>$(TORCoreBin)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TOR_Core">
+      <HintPath>$(TORCoreBin)\TOR_Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <Reference Include="TaleWorlds.Core">
+      <HintPath>$(GameBin)\TaleWorlds.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.CampaignSystem">
+      <HintPath>$(GameBin)\TaleWorlds.CampaignSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Library">
+      <HintPath>$(GameBin)\TaleWorlds.Library.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.LinQuick">
+      <HintPath>$(GameBin)\TaleWorlds.LinQuick.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade">
+      <HintPath>$(GameBin)\TaleWorlds.MountAndBlade.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.ObjectSystem">
+      <HintPath>$(GameBin)\TaleWorlds.ObjectSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.CampaignSystem.ViewModelCollection">
+      <HintPath>$(GameBin)\TaleWorlds.CampaignSystem.ViewModelCollection.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Core.ViewModelCollection">
+      <HintPath>$(GameBin)\TaleWorlds.Core.ViewModelCollection.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Копируем SubModule.xml рядом с Modules\<mod>\SubModule.xml после билда -->
+  <Target Name="CopySubModuleXml" AfterTargets="Build">
+    <Copy SourceFiles="SubModule.xml" DestinationFolder="$(ModuleDir)" />
+  </Target>
+
+</Project>
