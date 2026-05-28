@@ -174,12 +174,12 @@ Mules: sold M lame, earned Y g
 ## Файлы
 
 ```
-D:/dev/TOR_QoLs/
+TOR_QoLs/
 ├── Behaviors/
-│   └── SmartFoodTraderBehavior.cs  ← расширить
+│   └── SmartFoodTraderBehavior.cs   ← основная логика food + livestock + horses
 ├── Patches/
-│   └── SellAllPostfixPatch.cs       ← создать
-└── SubModule.cs                      ← register behavior (уже есть)
+│   └── SellAllPostfixPatch.cs        ← Wave 1+2 на Sell All
+└── SubModule.cs                       ← регистрация behavior
 ```
 
 Build: `dotnet build -c Release` → деплой в `Modules/TOR_QoLs/`.
