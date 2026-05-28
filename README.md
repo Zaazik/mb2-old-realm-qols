@@ -1,61 +1,76 @@
-# TOR QoLs — Quality-of-Life Mod for The Old Realms
+# Mount & Blade II: Bannerlord — The Old Realms Mods
 
-Сборник QoL-фиксов и фичей для мода **The Old Realms** (TOR) на Mount & Blade II: Bannerlord v1.3.15.
+Сборник модов для **Mount & Blade II: Bannerlord v1.3.15** в связке с **The Old Realms (TOR)** total conversion.
 
-## Что внутри
+## Содержимое репо
 
-### Harmony патчи
+### [`TOR_QoLs/`](TOR_QoLs/) — Quality-of-Life patches + Smart Food Trader
 
-| Файл | Что патчит | Что делает |
-|---|---|---|
-| `Patches/CivilianWindsWeightPatch.cs` | `TORAbilityModel.GetWindsRechargeRate` (Transpiler) | Штраф к регену маны от веса брони считается с **CivilianEquipment**, не с BattleEquipment. Маг может носить тяжёлую боевую броню без потери регена, держа лёгкую гражданку. |
-| `Patches/FixMagicItemHighlightPatch.cs` | `ExtendedItemObjectManager.HasMagicItemId` (Prefix) | Чинит TOR-баг: модифицированные magic-предметы (Сбалансированное / Заточенное) теряли фиолетовую подсветку в инвентаре. |
-| `Patches/SkillBasedCanUsePatch.cs` | `SPInventoryVM.RefreshCharacterCanUseItem` (Postfix, Priority.Last) | Возвращает красную подсветку для предметов с невзятым skill-difficulty (TOR-патч перетирал нативный skill-чек race-проверкой). |
-| `Patches/SellAllPostfixPatch.cs` | `SPInventoryVM.ExecuteSellAllItems` (Postfix, Priority.Last) | После нажатия "Sell All" в trade screen: Wave 1 — продаёт всех lame warhorses/mules; Wave 2 — продаёт самых дорогих unlocked до target_count. Уважает native locks. |
+Свой мод, набор Harmony патчей и Campaign Behaviors:
+- **CivilianWindsWeightPatch** — weight-малус регена маны от civilian-сета (можно носить тяжёлую боевую броню без потери магии)
+- **FixMagicItemHighlightPatch** — чинит фиолетовую подсветку для модифицированных magic-предметов
+- **SkillBasedCanUsePatch** — красная подсветка для предметов с невзятым skill-difficulty
+- **SellAllPostfixPatch** — после "Sell All" в trade: продаёт lame лошадей и излишек дорогих unlocked
+- **SmartFoodTraderBehavior** — при входе в settlement: food upkeep + livestock butcher/sell + horse cleanup
 
-### Campaign Behavior
+См. [TOR_QoLs/SPEC_SmartFoodTrader.md](TOR_QoLs/SPEC_SmartFoodTrader.md) для деталей.
 
-| Файл | Что делает |
-|---|---|
-| `Behaviors/SmartFoodTraderBehavior.cs` | При входе MainParty в Town/Village: <br>• Food: докупка до 10 дней / продажа излишка свыше 15 дней (минимум 1 каждого типа для морал-бафа разнообразия) <br>• Livestock: per-unit выбор butcher vs sell по выгоде (использует `HorseComponent.MeatCount/HideCount`) <br>• Warhorses: продажа lame/sick если > `unmounted×1.15` <br>• Mules: продажа lame/sick если > `totalMen×0.45` <br>• Красное warning если warhorses < unmounted_infantry <br>• Итоговое сообщение в чат |
+### [`AutoEquipCompanions/`](AutoEquipCompanions/) — кастомный форк AEC
 
-## Установка
+Форк [mwsaari/AutoEquipCompanions](https://github.com/mwsaari/AutoEquipCompanions) с TOR-специфичными правками:
+- **WeaponClass matching** — same-type фильтр теперь по `WeaponClass` (sword/mace/axe/bow/etc.) а не по общему `ItemType`. Топоры остаются топорами, посохи — посохами.
+- **Magic amplifier scoring** — `GetScore` для оружия учитывает суммарный `AmplifierTuple.DamageAmplifier` со всех трейтов предмета. Magic-amped items приоритезируются.
+- **Torch stat-stick differentiation** — `item_usage="torch"` (Death Wizard Staff и т.п.) не свапается с реальным оружием того же class.
+- **EHP-based armor scoring** — `DefaultArmorTemplate.GetScore` считает effective HP (база HP + HealthMax трейты × armor multiplier × phys resist multiplier). Магические резы намеренно игнорируются.
+- **MainHero-first ordering** — главгерой одевается первым из общего пула.
+- **TOR_Core dependency** — добавлен reference для доступа к `GetTraits()` extension и `AmplifierTuple`.
 
-Mod-папка: `<Bannerlord install>/Modules/TOR_QoLs/`
-
-Зависимости (load order должен быть выше нашего мода):
-- `Native`
-- `Bannerlord.Harmony` (workshop)
-- `TOR_Core` (The Old Realms)
-
-В лаунчере порядок:
-```
-... Harmony → Native → ... → TOR_Core → TOR_QoLs
-```
+Билд через свой `AutoEquipCompanions.Build.csproj` (SDK-style, под Windows; оригинальный csproj был с Linux-путями).
 
 ## Сборка
 
-Требования: .NET SDK 8+, цель `net48`.
+Требования:
+- .NET SDK 8+
+- Bannerlord установлен где-то (по умолчанию `D:\SteamLibrary\steamapps\common\Mount & Blade II Bannerlord`)
+
+### TOR_QoLs
 
 ```bash
+cd TOR_QoLs
 dotnet build -c Release
 ```
 
-Build кладёт DLL прямо в `<Bannerlord install>/Modules/TOR_QoLs/bin/Win64_Shipping_Client/` через переменную `$(GameDir)` в csproj.
+DLL деплоится в `<game>/Modules/TOR_QoLs/`.
 
-Если установка Bannerlord не по умолчанию — поправь `<GameDir>` в `TOR_QoLs.csproj`:
-```xml
-<GameDir>D:\SteamLibrary\steamapps\common\Mount &amp; Blade II Bannerlord</GameDir>
+### AutoEquipCompanions
+
+```bash
+cd AutoEquipCompanions
+dotnet build AutoEquipCompanions.Build.csproj -c Release
 ```
 
-## Версия
+DLL деплоится в `<game>/Modules/AutoEquipCompanions/`.
 
-Auto-stamped из UTC build time: `1.0.YYMMDD.HHMM` (через csproj). На главном меню видно зелёным `TOR QoLs v<version> loaded`.
+Если установка Bannerlord не по умолчанию — поправь `<GameDir>` в соответствующем csproj.
 
-## Планы
+## Установка в игре
 
-См. `SPEC_SmartFoodTrader.md` — спецификация дальнейших доработок.
+Load order в лаунчере (после native):
+```
+Bannerlord.Harmony
+Native
+SandBoxCore
+Sandbox
+StoryMode
+CustomBattle
+TOR_Armory
+TOR_Environment
+TOR_Core
+AutoEquipCompanions
+TOR_QoLs
+```
 
 ## Лицензия
 
-TBD (выберешь свою).
+- `TOR_QoLs/` — TBD
+- `AutoEquipCompanions/` — наследует лицензию upstream (см. `AutoEquipCompanions/README.md`)

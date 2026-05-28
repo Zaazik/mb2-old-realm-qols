@@ -13,3 +13,6 @@ obj/
 # Misc
 *.bak
 *.tmp
+
+# NuGet packages from AEC's old csproj
+AutoEquipCompanions/packages/

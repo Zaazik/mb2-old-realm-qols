@@ -1,0 +1,14 @@
+# ignore ALL .log files
+*.log
+
+# ignore ALL files in ANY directory named temp
+temp/
+obj/
+/Modules/AutoEquipCompanions/bin/Win64_Shipping_Client
+/packages/Newtonsoft.Json.13.0.1
+/bin
+/.vs
+_publishFiles/
+*.csproj.user
+*.DotSettings
+app.config

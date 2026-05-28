@@ -1,0 +1,141 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Local Windows build for AutoEquipCompanions.
+    Original csproj had Linux paths (/mnt/ssd2/...) and old MSBuild style.
+    This file is SDK-style, references Windows paths, builds straight into Modules.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latestMajor</LangVersion>
+    <AssemblyName>AutoEquipCompanions</AssemblyName>
+    <RootNamespace>AutoEquipCompanions</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Deterministic>true</Deterministic>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+
+    <!-- Корни -->
+    <GameDir>D:\SteamLibrary\steamapps\common\Mount &amp; Blade II Bannerlord</GameDir>
+    <GameBin>$(GameDir)\bin\Win64_Shipping_Client</GameBin>
+    <NativeMod>$(GameDir)\Modules\Native\bin\Win64_Shipping_Client</NativeMod>
+    <SandBoxMod>$(GameDir)\Modules\SandBox\bin\Win64_Shipping_Client</SandBoxMod>
+    <ModuleDir>$(GameDir)\Modules\AutoEquipCompanions</ModuleDir>
+    <OutputPath>$(ModuleDir)\bin\Win64_Shipping_Client\</OutputPath>
+    <!-- TOR_Core нужен для доступа к ItemTrait.AmplifierTuple через GetTraits() -->
+    <TORCoreBin>D:\tmp\TOR_Core\bin\Win64_Shipping_Client</TORCoreBin>
+  </PropertyGroup>
+
+  <!-- Source: исключаем AssemblyInfo (SDK генерит сам) и тесты -->
+  <ItemGroup>
+    <Compile Remove="Properties\AssemblyInfo.cs" />
+    <Compile Remove="Tests\**" />
+    <Compile Remove="AutoEquipCompanions.Test.cs" />
+    <None Remove="Tests\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Game DLLs -->
+    <Reference Include="TaleWorlds.CampaignSystem">
+      <HintPath>$(GameBin)\TaleWorlds.CampaignSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.CampaignSystem.ViewModelCollection">
+      <HintPath>$(GameBin)\TaleWorlds.CampaignSystem.ViewModelCollection.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Core">
+      <HintPath>$(GameBin)\TaleWorlds.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Core.ViewModelCollection">
+      <HintPath>$(GameBin)\TaleWorlds.Core.ViewModelCollection.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Library">
+      <HintPath>$(GameBin)\TaleWorlds.Library.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.MountAndBlade">
+      <HintPath>$(GameBin)\TaleWorlds.MountAndBlade.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.GauntletUI">
+      <HintPath>$(GameBin)\TaleWorlds.GauntletUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Engine.GauntletUI">
+      <HintPath>$(GameBin)\TaleWorlds.Engine.GauntletUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.ScreenSystem">
+      <HintPath>$(GameBin)\TaleWorlds.ScreenSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.TwoDimension">
+      <HintPath>$(GameBin)\TaleWorlds.TwoDimension.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Localization">
+      <HintPath>$(GameBin)\TaleWorlds.Localization.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.ObjectSystem">
+      <HintPath>$(GameBin)\TaleWorlds.ObjectSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.InputSystem">
+      <HintPath>$(GameBin)\TaleWorlds.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.SaveSystem">
+      <HintPath>$(GameBin)\TaleWorlds.SaveSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.Engine">
+      <HintPath>$(GameBin)\TaleWorlds.Engine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="TaleWorlds.NavigationSystem">
+      <HintPath>$(GameBin)\TaleWorlds.NavigationSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- SandBox modules -->
+    <Reference Include="SandBox">
+      <HintPath>$(SandBoxMod)\SandBox.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SandBox.GauntletUI">
+      <HintPath>$(SandBoxMod)\SandBox.GauntletUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- TOR_Core: для GetTraits() и AmplifierTuple -->
+    <Reference Include="TOR_Core">
+      <HintPath>$(TORCoreBin)\TOR_Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- После билда копируем ассеты в Modules\AutoEquipCompanions\ -->
+  <Target Name="CopyModuleAssets" AfterTargets="Build">
+    <ItemGroup>
+      <_GuiFiles Include="GUI\**\*.*" />
+      <_RootFiles Include="_moduleFiles\game_settings.json" />
+      <_RootFiles Include="_moduleFiles\readme.txt" />
+      <_RootFiles Include="_moduleFiles\LICENSE" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_GuiFiles)" DestinationFiles="@(_GuiFiles->'$(ModuleDir)\GUI\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(_RootFiles)" DestinationFolder="$(ModuleDir)" />
+    <!-- Submodule.xml в репе с маленькой 'm', Bannerlord ожидает SubModule.xml -->
+    <Copy SourceFiles="_moduleFiles\Submodule.xml" DestinationFiles="$(ModuleDir)\SubModule.xml" />
+  </Target>
+
+</Project>
