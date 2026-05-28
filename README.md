@@ -13,7 +13,9 @@
 - **SellAllPostfixPatch** — после "Sell All" в trade: продаёт lame лошадей и излишек дорогих unlocked
 - **SmartFoodTraderBehavior** — при входе в settlement: food upkeep + livestock butcher/sell + horse cleanup
 
-См. [TOR_QoLs/SPEC_SmartFoodTrader.md](TOR_QoLs/SPEC_SmartFoodTrader.md) для деталей.
+См. [docs/spec/SPEC_SmartFoodTrader.md](docs/spec/SPEC_SmartFoodTrader.md) для деталей плана.
+
+Project notes / контекст сессии: [docs/memory/project_bannerlord_tor.md](docs/memory/project_bannerlord_tor.md).
 
 ### [`AutoEquipCompanions/`](AutoEquipCompanions/) — кастомный форк AEC
 
