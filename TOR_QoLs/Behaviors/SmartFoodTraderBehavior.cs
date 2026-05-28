@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using HarmonyLib;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
+using TaleWorlds.CampaignSystem.ComponentInterfaces;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.CampaignSystem.ViewModelCollection;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 
@@ -21,22 +24,14 @@ namespace TOR_QoLs.Behaviors
     /// </summary>
     public class SmartFoodTraderBehavior : CampaignBehaviorBase
     {
-        // Food
-        private const float FoodMinDays = 10f;
-        private const float FoodMaxDays = 15f;
-        // TESTING: цена-фильтры временно отключены (см. docs/issues.md #4).
-        // Изначально были BuyPriceCap=1.5 / SellPriceFloor=0.7, но TOR-овский
-        // TORTradeItemPriceFactorModel занижает sell-цены на equipment до 50%
-        // при низком Trade skill, и наш фильтр 0.7 мог отсекать всё.
-        private const float BuyPriceCap = 999f;   // effectively disabled
-        private const float SellPriceFloor = 0f;   // effectively disabled
-
-        // Horses/Mules
-        private const float WarhorseBufferPct = 0.15f;   // target_warhorses = unmounted × (1 + 0.15)
-        private const float MuleTargetPct = 0.45f;       // target_mules = totalMen × 0.45
+        // Все формулы и константы — в TraderMath (pure, покрыты тестами).
+        // Здесь остаются только маркеры и переключатели диагностики.
 
         // Lame status marker
         private const string LameModifierId = "lame_horse";
+
+        // Diagnostics toggle. true → подробные FileLog в HarmonyLog.txt.
+        private static readonly bool Diagnostics = true;
 
         public override void RegisterEvents()
         {
@@ -68,138 +63,201 @@ namespace TOR_QoLs.Behaviors
         {
             var stats = new TradeStats();
 
-            // 1. Daily food consumption (с учётом всех источников food party.FoodChange).
-            float dailyConsumption = Math.Abs(party.FoodChange);
-            if (dailyConsumption < 0.1f) dailyConsumption = Math.Max(1f, party.MemberRoster.TotalManCount / 20f);
-
             int totalMen = party.MemberRoster.TotalManCount;
+            float dailyConsumption = TraderMath.NormalizeDailyConsumption(Math.Abs(party.FoodChange), totalMen);
+
             int unmountedInf = party.Party.NumberOfMenWithoutHorse;
             int warhorses = party.ItemRoster.NumberOfMounts;
             int mules = party.ItemRoster.NumberOfPackAnimals;
 
-            int targetWarhorses = unmountedInf + (int)Math.Ceiling(WarhorseBufferPct * totalMen);
-            int targetMules = (int)(MuleTargetPct * totalMen);
+            int targetWarhorses = TraderMath.TargetWarhorses(totalMen, unmountedInf);
+            int desiredMules = TraderMath.DesiredMules(totalMen);
 
-            // 2. Livestock — sell vs butcher per-unit
-            ProcessLivestock(party, settlement, stats, dailyConsumption);
+            int currentFoodTotal = SumFood(party);
+            float requiredFood = dailyConsumption * TraderMath.FoodMinDays;
 
-            // 3. Food — buy if short, sell if excess (после livestock-butcher мяса добавилось)
-            ProcessFood(party, settlement, stats, dailyConsumption);
+            var lockedSet = GetUserLocks();
 
-            // 4. Warhorses — продаём только lame/sick если > target
-            ProcessLameOnly(party, settlement, stats, warhorses, targetWarhorses,
-                isPackAnimalCategory: false, label: "warhorses");
+            Diag($"=== entry settlement={settlement.StringId} ({(settlement.IsTown ? "town" : "village")}) ===");
+            Diag($"  totalMen={totalMen} unmountedInf={unmountedInf} warhorses={warhorses} mules={mules} locks={lockedSet.Count}");
+            Diag($"  dailyFood={dailyConsumption:F2} currentFood={currentFoodTotal} required={requiredFood:F0} gold={Hero.MainHero.Gold}");
+            Diag($"  targets: warhorses={targetWarhorses} desiredMules={desiredMules}");
 
-            // 5. Mules — то же
-            ProcessLameOnly(party, settlement, stats, mules, targetMules,
-                isPackAnimalCategory: true, label: "mules");
+            ProcessLivestock(party, settlement, stats, currentFoodTotal, requiredFood, lockedSet);
 
-            // 6. Финальное сообщение + красное предупреждение если warhorses < unmounted_infantry
+            ProcessFood(party, settlement, stats, dailyConsumption, lockedSet);
+
+            // Warhorses: respect locks. Wave 1 (lame) + Wave 2 (cheapest non-lame до target).
+            ProcessHerdTrim(party, settlement, stats, warhorses, targetWarhorses,
+                isPackAnimalCategory: false, label: "warhorses", lockedSet: lockedSet, ignoreLocks: false);
+
+            // Mule target — sweet spot priority: если livestock + excess warhorses уже
+            // заполнили herd-budget (>= totalMen) — мулов до 0. Иначе up to desiredMules.
+            int livestockNow = SumLivestock(party);
+            int warhorsesNow = party.ItemRoster.NumberOfMounts;
+            int excessWarhorsesNow = TraderMath.ExcessWarhorses(warhorsesNow, unmountedInf);
+            int muleRoom = TraderMath.MuleRoom(totalMen, livestockNow, excessWarhorsesNow);
+            int targetMules = TraderMath.TargetMules(desiredMules, muleRoom);
+            Diag($"  mule sweet-spot: livestock={livestockNow} excessWh={excessWarhorsesNow} room={muleRoom} → target={targetMules}");
+
+            // Pack animals: lock игнор. Wave 1 (lame) + Wave 2 (cheapest до target).
+            ProcessHerdTrim(party, settlement, stats, mules, targetMules,
+                isPackAnimalCategory: true, label: "mules", lockedSet: lockedSet, ignoreLocks: true);
+
             int finalWarhorses = party.ItemRoster.NumberOfMounts;
-            int finalFoodSum = party.ItemRoster
-                .Where(e => e.EquipmentElement.Item?.IsFood == true)
-                .Sum(e => e.Amount);
+            int finalFoodSum = SumFood(party);
             int finalDays = (int)(finalFoodSum / Math.Max(dailyConsumption, 0.1f));
 
-            EmitMessage(stats, finalDays, finalWarhorses, unmountedInf);
+            Diag($"  final: warhorses={finalWarhorses} food={finalFoodSum} (~{finalDays}d) net={stats.Earned - stats.Spent}");
+
+            EmitMessages(stats, finalDays, finalFoodSum, (int)Math.Ceiling(requiredFood), finalWarhorses, unmountedInf);
+        }
+
+        private static int SumFood(MobileParty party)
+        {
+            return party.ItemRoster
+                .Where(e => e.EquipmentElement.Item?.IsFood == true)
+                .Sum(e => e.Amount);
+        }
+
+        private static int SumLivestock(MobileParty party)
+        {
+            return party.ItemRoster
+                .Where(e => e.EquipmentElement.Item?.HorseComponent?.IsLiveStock == true)
+                .Sum(e => e.Amount);
         }
 
         // ----------------- Livestock pass -----------------
 
-        private void ProcessLivestock(MobileParty party, Settlement settlement, TradeStats stats, float dailyConsumption)
+        private void ProcessLivestock(MobileParty party, Settlement settlement, TradeStats stats,
+                                       int currentFoodTotal, float requiredFood, HashSet<string> lockedSet)
         {
-            // Снимаем снимок livestock-элементов (чтобы итерация не падала при изменении roster)
             var livestockSnapshot = new List<ItemRosterElement>();
             foreach (var element in party.ItemRoster)
             {
-                if (element.EquipmentElement.Item?.HorseComponent?.IsLiveStock == true)
-                    livestockSnapshot.Add(element);
+                if (element.EquipmentElement.Item?.HorseComponent?.IsLiveStock != true) continue;
+                if (IsLocked(element.EquipmentElement, lockedSet))
+                {
+                    Diag($"  livestock locked skip: {element.EquipmentElement.Item.StringId}");
+                    continue;
+                }
+                livestockSnapshot.Add(element);
             }
+            Diag($"[livestock] kinds={livestockSnapshot.Count} currentFood={currentFoodTotal} required={requiredFood:F0}");
             if (livestockSnapshot.Count == 0) return;
+
+            int meatSellPrice = DefaultItems.Meat != null
+                ? GetSellPrice(party, settlement, new EquipmentElement(DefaultItems.Meat))
+                : 0;
+            int meatBuyPrice = DefaultItems.Meat != null
+                ? GetBuyPrice(party, settlement, new EquipmentElement(DefaultItems.Meat))
+                : 0;
+            int hideSellPrice = DefaultItems.Hides != null
+                ? GetSellPrice(party, settlement, new EquipmentElement(DefaultItems.Hides))
+                : 0;
+
+            int remainingDeficit = Math.Max(0, (int)Math.Ceiling(requiredFood - currentFoodTotal));
 
             foreach (var element in livestockSnapshot)
             {
                 var item = element.EquipmentElement.Item;
                 var horseComp = item.HorseComponent;
-                int amount = party.ItemRoster.GetItemNumber(item);
+                int amount = element.Amount;
                 if (amount <= 0) continue;
 
                 int sellPrice = GetSellPrice(party, settlement, element.EquipmentElement);
-
                 int meatCount = horseComp.MeatCount;
                 int hideCount = horseComp.HideCount;
+                float floor = GetSellFloor(item);
+                bool sellOk = sellPrice >= item.Value * floor;
 
-                int meatPrice = DefaultItems.Meat != null
-                    ? GetSellPrice(party, settlement, new EquipmentElement(DefaultItems.Meat))
-                    : 0;
-                int hidePrice = DefaultItems.Hides != null
-                    ? GetSellPrice(party, settlement, new EquipmentElement(DefaultItems.Hides))
-                    : 0;
+                Diag($"  {item.StringId} ×{amount}: sellPrice={sellPrice} (floor={item.Value * floor:F0}) meat={meatCount}@{meatSellPrice}/{meatBuyPrice} hide={hideCount}@{hideSellPrice} deficit={remainingDeficit}");
 
-                int butcherValue = meatCount * meatPrice + hideCount * hidePrice;
+                var (butcherCount, sellCount, newDeficit) = TraderMath.SimulateLivestockBatch(
+                    amount, meatCount, hideCount,
+                    sellPrice, meatBuyPrice, meatSellPrice, hideSellPrice,
+                    remainingDeficit, sellOk);
 
-                // Sell-цена-фильтр: и livestock, и butcher products должны быть в норме
-                bool sellOk = sellPrice >= item.Value * SellPriceFloor;
-
-                for (int unitIdx = 0; unitIdx < amount; unitIdx++)
+                if (butcherCount > 0)
                 {
-                    if (butcherValue > sellPrice)
-                    {
-                        // Butcher: livestock-1, +meat, +hides
-                        party.ItemRoster.AddToCounts(element.EquipmentElement, -1);
-                        if (DefaultItems.Meat != null && meatCount > 0)
-                            party.ItemRoster.AddToCounts(DefaultItems.Meat, meatCount);
-                        if (DefaultItems.Hides != null && hideCount > 0)
-                            party.ItemRoster.AddToCounts(DefaultItems.Hides, hideCount);
-                        stats.LivestockButchered++;
-                        stats.MeatGained += meatCount;
-                        stats.HidesGained += hideCount;
-                    }
-                    else if (sellOk)
-                    {
-                        // Sell as livestock
-                        party.ItemRoster.AddToCounts(element.EquipmentElement, -1);
-                        settlement.ItemRoster.AddToCounts(element.EquipmentElement, 1);
-                        GiveGoldAction.ApplyBetweenCharacters(settlement.OwnerClan?.Leader, Hero.MainHero, sellPrice);
-                        stats.Earned += sellPrice;
-                        stats.LivestockSold++;
-                    }
-                    else
-                    {
-                        // Цена не устраивает — оставляем
-                        break;
-                    }
+                    party.ItemRoster.AddToCounts(element.EquipmentElement, -butcherCount);
+                    if (DefaultItems.Meat != null && meatCount > 0)
+                        party.ItemRoster.AddToCounts(DefaultItems.Meat, butcherCount * meatCount);
+                    if (DefaultItems.Hides != null && hideCount > 0)
+                        party.ItemRoster.AddToCounts(DefaultItems.Hides, butcherCount * hideCount);
+                    stats.LivestockButchered += butcherCount;
+                    stats.MeatGained += butcherCount * meatCount;
+                    stats.HidesGained += butcherCount * hideCount;
+                    Diag($"  → BUTCHER {butcherCount}× → +{butcherCount * meatCount} meat / +{butcherCount * hideCount} hides");
                 }
+
+                if (sellCount > 0)
+                {
+                    int totalEarn = sellPrice * sellCount;
+                    party.ItemRoster.AddToCounts(element.EquipmentElement, -sellCount);
+                    settlement.ItemRoster.AddToCounts(element.EquipmentElement, sellCount);
+                    GiveGoldAction.ApplyBetweenCharacters(settlement.OwnerClan?.Leader, Hero.MainHero, totalEarn, disableNotification: true);
+                    stats.Earned += totalEarn;
+                    stats.LivestockSold += sellCount;
+                    Diag($"  → SELL {sellCount}× @ {sellPrice} = {totalEarn}g");
+                }
+
+                if (butcherCount == 0 && sellCount == 0)
+                    Diag($"  → SKIP all (sellPrice={sellPrice} < floor={item.Value * floor:F0}, butcher <= sell)");
+
+                remainingDeficit = newDeficit;
             }
         }
 
         // ----------------- Food pass -----------------
 
-        private void ProcessFood(MobileParty party, Settlement settlement, TradeStats stats, float dailyConsumption)
+        private void ProcessFood(MobileParty party, Settlement settlement, TradeStats stats, float dailyConsumption, HashSet<string> lockedSet)
         {
-            float requiredFood = dailyConsumption * FoodMinDays;
-            float bufferFood = dailyConsumption * FoodMaxDays;
+            float requiredFood = dailyConsumption * TraderMath.FoodMinDays;
+            float bufferFood = TraderMath.BufferFood(dailyConsumption);
 
             var partyFood = new List<ItemRosterElement>();
             int currentFoodTotal = 0;
+            int totalDistinctKinds = 0;  // all food entries (locked + unlocked) для diversity check
             foreach (var element in party.ItemRoster)
             {
-                if (element.EquipmentElement.Item?.IsFood == true)
+                if (element.EquipmentElement.Item?.IsFood != true) continue;
+                currentFoodTotal += element.Amount;
+                totalDistinctKinds++;
+                if (IsLocked(element.EquipmentElement, lockedSet))
                 {
-                    partyFood.Add(element);
-                    currentFoodTotal += element.Amount;
+                    Diag($"  food locked skip: {element.EquipmentElement.Item.StringId} (count in total but not sold)");
+                    continue;
                 }
+                partyFood.Add(element);
             }
+
+            Diag($"[food] current={currentFoodTotal} required={requiredFood:F0} buffer={bufferFood:F0} totalKinds={totalDistinctKinds} unlockedKinds={partyFood.Count}");
 
             if (currentFoodTotal < requiredFood)
             {
                 int needed = (int)Math.Ceiling(requiredFood - currentFoodTotal);
+                Diag($"  → BUY needed={needed}");
                 stats.Spent += BuyFood(party, settlement, needed);
             }
-            else if (currentFoodTotal > bufferFood && partyFood.Count >= 2)
+            // Spec шаг 3: diversity ≥ 2 — учитываем locked food тоже (она держит мораль-баф).
+            // Продаём только из unlocked, но diversity gate смотрит на total entries.
+            else if (currentFoodTotal > bufferFood && totalDistinctKinds >= 2 && partyFood.Count >= 1)
             {
                 int excess = (int)(currentFoodTotal - bufferFood);
-                stats.Earned += SellFood(party, settlement, partyFood, excess);
+                Diag($"  → SELL excess={excess}");
+                int gained = SellFood(party, settlement, partyFood, excess);
+                stats.Earned += gained;
+                stats.FoodEarned += gained;
+            }
+            else
+            {
+                string reason = currentFoodTotal <= bufferFood
+                    ? "within buffer"
+                    : totalDistinctKinds < 2
+                        ? $"only {totalDistinctKinds} food kind(s), need ≥2"
+                        : "all food kinds locked";
+                Diag($"  → SKIP ({reason})");
             }
         }
 
@@ -222,7 +280,11 @@ namespace TOR_QoLs.Behaviors
             foreach (var offer in offers)
             {
                 if (neededUnits <= 0) break;
-                if (offer.Price > offer.Item.Value * BuyPriceCap) continue;
+                if (offer.Price > offer.Item.Value * TraderMath.BuyPriceCapFood)
+                {
+                    Diag($"  buy skip {offer.Item.StringId}: price={offer.Price} > cap={offer.Item.Value * TraderMath.BuyPriceCapFood:F0}");
+                    continue;
+                }
 
                 int affordableByGold = Hero.MainHero.Gold / Math.Max(offer.Price, 1);
                 int buyCount = Math.Min(Math.Min(offer.Element.Amount, neededUnits), affordableByGold);
@@ -231,9 +293,10 @@ namespace TOR_QoLs.Behaviors
                 int totalCost = offer.Price * buyCount;
                 settlement.ItemRoster.AddToCounts(offer.Element.EquipmentElement, -buyCount);
                 party.ItemRoster.AddToCounts(offer.Element.EquipmentElement, buyCount);
-                GiveGoldAction.ApplyBetweenCharacters(Hero.MainHero, settlement.OwnerClan?.Leader, totalCost);
+                GiveGoldAction.ApplyBetweenCharacters(Hero.MainHero, settlement.OwnerClan?.Leader, totalCost, disableNotification: true);
                 spent += totalCost;
                 neededUnits -= buyCount;
+                Diag($"  bought {buyCount} {offer.Item.StringId} @ {offer.Price} = {totalCost}g");
             }
             return spent;
         }
@@ -255,7 +318,12 @@ namespace TOR_QoLs.Behaviors
             foreach (var offer in sorted)
             {
                 if (excessUnits <= 0) break;
-                if (offer.SellPrice < offer.Item.Value * SellPriceFloor) continue;
+                float floor = GetSellFloor(offer.Item);
+                if (offer.SellPrice < offer.Item.Value * floor)
+                {
+                    Diag($"  sell skip {offer.Item.StringId}: price={offer.SellPrice} < floor={offer.Item.Value * floor:F0}");
+                    continue;
+                }
 
                 int maxSellable = Math.Max(0, offer.Element.Amount - 1); // оставить 1 для морал-бафа
                 int sellCount = Math.Min(maxSellable, excessUnits);
@@ -264,50 +332,111 @@ namespace TOR_QoLs.Behaviors
                 int totalEarned = offer.SellPrice * sellCount;
                 party.ItemRoster.AddToCounts(offer.Element.EquipmentElement, -sellCount);
                 settlement.ItemRoster.AddToCounts(offer.Element.EquipmentElement, sellCount);
-                GiveGoldAction.ApplyBetweenCharacters(settlement.OwnerClan?.Leader, Hero.MainHero, totalEarned);
+                GiveGoldAction.ApplyBetweenCharacters(settlement.OwnerClan?.Leader, Hero.MainHero, totalEarned, disableNotification: true);
                 earned += totalEarned;
                 excessUnits -= sellCount;
+                Diag($"  sold {sellCount} {offer.Item.StringId} @ {offer.SellPrice} = {totalEarned}g");
             }
             return earned;
         }
 
-        // ----------------- Horse/Mule Wave 1 pass -----------------
+        // ----------------- Horse/Mule entry trim -----------------
+        // Wave 1: продать lame (приоритет — они бесполезны)
+        // Wave 2: cheapest non-lame до target (sell All использует expensive — но на entry
+        //         сохраняем самых дорогих, продаём дешёвых для освобождения слотов)
 
-        private void ProcessLameOnly(MobileParty party, Settlement settlement, TradeStats stats,
-                                       int currentCount, int target, bool isPackAnimalCategory, string label)
+        private void ProcessHerdTrim(MobileParty party, Settlement settlement, TradeStats stats,
+                                       int currentCount, int target, bool isPackAnimalCategory, string label,
+                                       HashSet<string> lockedSet, bool ignoreLocks)
         {
-            if (currentCount <= target) return;
+            if (currentCount <= target)
+            {
+                Diag($"[{label}] SKIP count={currentCount} <= target={target}");
+                return;
+            }
             int toSell = currentCount - target;
 
-            var candidates = party.ItemRoster
+            var allCandidates = party.ItemRoster
                 .Where(e =>
                 {
                     var hc = e.EquipmentElement.Item?.HorseComponent;
                     if (hc == null) return false;
-                    if (isPackAnimalCategory ? !hc.IsPackAnimal : !hc.IsMount) return false;
-                    return IsLame(e.EquipmentElement);
+                    if (!(isPackAnimalCategory ? hc.IsPackAnimal : (hc.IsMount && !hc.IsPackAnimal))) return false;
+                    if (!ignoreLocks && IsLocked(e.EquipmentElement, lockedSet))
+                    {
+                        Diag($"  [{label}] locked skip: {e.EquipmentElement.Item.StringId}");
+                        return false;
+                    }
+                    return true;
                 })
                 .ToList();
 
-            foreach (var element in candidates)
+            var lameCandidates = allCandidates.Where(e => IsLame(e.EquipmentElement)).ToList();
+            int lameTotal = lameCandidates.Sum(e => e.Amount);
+
+            Diag($"[{label}] count={currentCount} target={target} toSell={toSell} lame={lameTotal}");
+
+            // Wave 1: lame first (приоритет — они бесполезны).
+            foreach (var element in lameCandidates)
             {
                 if (toSell <= 0) break;
-
+                var item = element.EquipmentElement.Item;
                 int sellPrice = GetSellPrice(party, settlement, element.EquipmentElement);
-                if (sellPrice < element.EquipmentElement.Item.Value * SellPriceFloor) continue;
-
+                float floor = GetSellFloor(item);
+                if (sellPrice < item.Value * floor)
+                {
+                    Diag($"  wave1 skip lame {item.StringId}: price={sellPrice} < floor={item.Value * floor:F0}");
+                    continue;
+                }
                 int sellCount = Math.Min(element.Amount, toSell);
                 int totalEarned = sellPrice * sellCount;
 
                 party.ItemRoster.AddToCounts(element.EquipmentElement, -sellCount);
                 settlement.ItemRoster.AddToCounts(element.EquipmentElement, sellCount);
-                GiveGoldAction.ApplyBetweenCharacters(settlement.OwnerClan?.Leader, Hero.MainHero, totalEarned);
+                GiveGoldAction.ApplyBetweenCharacters(settlement.OwnerClan?.Leader, Hero.MainHero, totalEarned, disableNotification: true);
 
                 stats.Earned += totalEarned;
                 if (isPackAnimalCategory) stats.MulesLameSold += sellCount;
                 else stats.WarhorsesLameSold += sellCount;
-
                 toSell -= sellCount;
+                Diag($"  wave1 sold {sellCount}× {item.StringId} (lame) @ {sellPrice} = {totalEarned}g");
+            }
+
+            if (toSell <= 0) return;
+
+            // Wave 2: cheapest non-lame до target. Дорогих сохраняем для боя.
+            var nonLameByPrice = allCandidates
+                .Where(e => !IsLame(e.EquipmentElement))
+                .Select(e => new
+                {
+                    Element = e,
+                    Item = e.EquipmentElement.Item,
+                    Price = GetSellPrice(party, settlement, e.EquipmentElement)
+                })
+                .OrderBy(x => x.Price)
+                .ToList();
+
+            foreach (var entry in nonLameByPrice)
+            {
+                if (toSell <= 0) break;
+                float floor = GetSellFloor(entry.Item);
+                if (entry.Price < entry.Item.Value * floor)
+                {
+                    Diag($"  wave2 skip {entry.Item.StringId}: price={entry.Price} < floor={entry.Item.Value * floor:F0}");
+                    continue;
+                }
+                int sellCount = Math.Min(entry.Element.Amount, toSell);
+                int totalEarned = entry.Price * sellCount;
+
+                party.ItemRoster.AddToCounts(entry.Element.EquipmentElement, -sellCount);
+                settlement.ItemRoster.AddToCounts(entry.Element.EquipmentElement, sellCount);
+                GiveGoldAction.ApplyBetweenCharacters(settlement.OwnerClan?.Leader, Hero.MainHero, totalEarned, disableNotification: true);
+
+                stats.Earned += totalEarned;
+                if (isPackAnimalCategory) stats.MulesExcessSold += sellCount;
+                else stats.WarhorsesExcessSold += sellCount;
+                toSell -= sellCount;
+                Diag($"  wave2 sold {sellCount}× {entry.Item.StringId} @ {entry.Price} = {totalEarned}g");
             }
         }
 
@@ -316,6 +445,35 @@ namespace TOR_QoLs.Behaviors
         private static bool IsLame(EquipmentElement element)
         {
             return element.ItemModifier != null && element.ItemModifier.StringId == LameModifierId;
+        }
+
+        private static HashSet<string> GetUserLocks()
+        {
+            try
+            {
+                var tracker = Campaign.Current?.GetCampaignBehavior<IViewDataTracker>();
+                var locks = tracker?.GetInventoryLocks();
+                if (locks == null) return new HashSet<string>();
+                return new HashSet<string>(locks);
+            }
+            catch
+            {
+                return new HashSet<string>();
+            }
+        }
+
+        private static bool IsLocked(EquipmentElement element, HashSet<string> lockedSet)
+        {
+            if (lockedSet == null || lockedSet.Count == 0) return false;
+            try
+            {
+                var lockId = CampaignUIHelper.GetItemLockStringID(element);
+                return lockedSet.Contains(lockId);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static int GetBuyPrice(MobileParty party, Settlement settlement, EquipmentElement element)
@@ -332,56 +490,90 @@ namespace TOR_QoLs.Behaviors
             return element.Item?.Value ?? 0;
         }
 
-        // ----------------- message -----------------
-
-        private void EmitMessage(TradeStats stats, int daysOfFood, int finalWarhorses, int unmountedInf)
+        private static float GetSellFloor(ItemObject item)
         {
-            // Основное summary
-            int net = stats.Earned - stats.Spent;
-            if (stats.AnyActivity)
+            if (item == null) return TraderMath.SellFloorFood;
+            var hc = item.HorseComponent;
+            if (hc != null)
             {
-                var parts = new List<string>();
-                if (stats.Spent > 0 || stats.Earned > 0)
-                    parts.Add($"spent {stats.Spent}g, earned {stats.Earned}g, net {net}g");
-                if (stats.LivestockButchered > 0)
-                    parts.Add($"butchered {stats.LivestockButchered} ({stats.MeatGained} meat / {stats.HidesGained} hides)");
-                if (stats.LivestockSold > 0)
-                    parts.Add($"sold {stats.LivestockSold} livestock");
-                if (stats.WarhorsesLameSold > 0)
-                    parts.Add($"sold {stats.WarhorsesLameSold} lame horses");
-                if (stats.MulesLameSold > 0)
-                    parts.Add($"sold {stats.MulesLameSold} lame mules");
-                parts.Add($"~{daysOfFood} days food");
+                if (hc.IsLiveStock) return TraderMath.SellFloorLivestock;
+                return TraderMath.SellFloorHorse;
+            }
+            return TraderMath.SellFloorFood;
+        }
 
-                uint color = net >= 0 ? 0xFF66FF66u : 0xFFFF6666u;
-                InformationManager.DisplayMessage(new InformationMessage(
-                    "Trader: " + string.Join(" | ", parts), Color.FromUint(color)));
+        private static void Diag(string msg)
+        {
+            if (!Diagnostics) return;
+            FileLog.Log("[SmartFood] " + msg);
+        }
+
+        // ----------------- messages -----------------
+
+        private const uint ColorGreen = 0xFF66FF66u;
+        private const uint ColorRed = 0xFFFF6666u;
+
+        private void EmitMessages(TradeStats stats, int daysOfFood, int finalFoodSum, int requiredFood,
+                                    int finalWarhorses, int unmountedInf)
+        {
+            // 1. Food
+            if (stats.Spent > 0)
+            {
+                if (finalFoodSum >= requiredFood)
+                    Display($"Food: bought up to ~{daysOfFood}d (-{stats.Spent}g)", ColorGreen);
+                else
+                    Display($"Food: short — spent {stats.Spent}g but still only {finalFoodSum}/{requiredFood} (~{daysOfFood}d)", ColorRed);
+            }
+            else if (stats.FoodEarned > 0)
+            {
+                Display($"Food: sold excess (+{stats.FoodEarned}g, ~{daysOfFood}d left)", ColorGreen);
             }
 
-            // Красное предупреждение если боевых лошадей недостаточно
+            // 2. Livestock
+            if (stats.LivestockSold + stats.LivestockButchered > 0)
+            {
+                var parts = new List<string>();
+                if (stats.LivestockSold > 0) parts.Add($"sold {stats.LivestockSold}");
+                if (stats.LivestockButchered > 0) parts.Add($"butchered {stats.LivestockButchered} (+{stats.MeatGained} meat, +{stats.HidesGained} hides)");
+                Display("Livestock: " + string.Join(", ", parts), ColorGreen);
+            }
+
+            // 3. Horses + mules (Wave 1 lame + Wave 2 cheapest non-lame до target)
+            int horsesSold = stats.WarhorsesLameSold + stats.WarhorsesExcessSold;
+            int mulesSold = stats.MulesLameSold + stats.MulesExcessSold;
+            if (horsesSold + mulesSold > 0)
+            {
+                var parts = new List<string>();
+                if (horsesSold > 0) parts.Add($"sold {horsesSold} horses");
+                if (mulesSold > 0) parts.Add($"sold {mulesSold} mules");
+                Display("Herd: " + string.Join(", ", parts), ColorGreen);
+            }
+
             if (finalWarhorses < unmountedInf)
             {
                 int missing = unmountedInf - finalWarhorses;
-                InformationManager.DisplayMessage(new InformationMessage(
-                    $"⚠ Need {missing} more warhorses for optimal speed",
-                    Color.FromUint(0xFFFF6666u)));
+                Display($"⚠ Need {missing} more warhorses for optimal speed", ColorRed);
             }
+        }
+
+        private static void Display(string text, uint color)
+        {
+            InformationManager.DisplayMessage(new InformationMessage(text, Color.FromUint(color)));
         }
 
         private class TradeStats
         {
-            public int Spent;
-            public int Earned;
+            public int Spent;            // sum spent buying food
+            public int Earned;            // total earned (food + livestock + herd)
+            public int FoodEarned;        // earned from sold excess food
             public int LivestockSold;
             public int LivestockButchered;
             public int MeatGained;
             public int HidesGained;
             public int WarhorsesLameSold;
+            public int WarhorsesExcessSold;
             public int MulesLameSold;
-
-            public bool AnyActivity => Spent != 0 || Earned != 0
-                                       || LivestockSold > 0 || LivestockButchered > 0
-                                       || WarhorsesLameSold > 0 || MulesLameSold > 0;
+            public int MulesExcessSold;
         }
     }
 }
