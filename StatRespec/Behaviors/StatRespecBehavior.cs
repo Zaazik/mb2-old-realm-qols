@@ -2,7 +2,9 @@ using System.Collections.Generic;
 using System.Linq;
 using StatRespec.Compat;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Extensions;
 using TaleWorlds.CampaignSystem.GameMenus;
+using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.ViewModelCollection;
 using TaleWorlds.Core;
@@ -15,6 +17,15 @@ namespace StatRespec.Behaviors
     public class StatRespecBehavior : CampaignBehaviorBase
     {
         public const int RespecCost = 10000;
+
+        private HeroSnapshot _snapshot;
+        private Hero _activeHero;
+        private bool _awaitingScreen;
+        private bool _screenSeen;
+
+        public static StatRespecBehavior Instance { get; private set; }
+
+        public StatRespecBehavior() { Instance = this; }
 
         public override void RegisterEvents()
         {
@@ -113,10 +124,78 @@ namespace StatRespec.Behaviors
             if (selected == null || selected.Count == 0) return;
             var hero = selected[0].Identifier as Hero;
             if (hero == null) return;
-            StartRespec(hero); // implemented in Task 7
+            StartRespec(hero);
         }
 
-        // Filled in by Tasks 7-8:
-        private void StartRespec(Hero hero) { }
+        private void StartRespec(Hero hero)
+        {
+            try
+            {
+                _snapshot = HeroSnapshot.Capture(hero);
+                _activeHero = hero;
+                ResetHero(hero);
+                var state = Game.Current.GameStateManager.CreateState<CharacterDeveloperState>(hero);
+                Game.Current.GameStateManager.PushState(state);
+                _screenSeen = false;
+                _awaitingScreen = true;
+            }
+            catch (System.Exception ex)
+            {
+                TaleWorlds.Library.Debug.Print("[StatRespec] StartRespec failed: " + ex);
+                Abort();
+            }
+        }
+
+        private void ResetHero(Hero hero)
+        {
+            var dev = hero.HeroDeveloper;
+            int attrCount = Attributes.All.Count();
+            int sumAttr = Attributes.All.Sum(a => hero.GetAttributeValue(a));
+            int sumFocus = Skills.All.Sum(s => dev.GetFocus(s));
+
+            int unspentAttr = StatRespec.Math.RespecMath.UnspentAttributesAfterReset(sumAttr, dev.UnspentAttributePoints, attrCount);
+            int unspentFocus = StatRespec.Math.RespecMath.UnspentFocusAfterReset(sumFocus, dev.UnspentFocusPoints);
+
+            foreach (var a in Attributes.All)
+            {
+                int cur = hero.GetAttributeValue(a);
+                if (cur > StatRespec.Math.RespecMath.AttributeFloor) dev.RemoveAttribute(a, cur - StatRespec.Math.RespecMath.AttributeFloor);
+                else if (cur < StatRespec.Math.RespecMath.AttributeFloor) dev.AddAttribute(a, StatRespec.Math.RespecMath.AttributeFloor - cur, false);
+            }
+            foreach (var s in Skills.All)
+            {
+                int f = dev.GetFocus(s);
+                if (f > 0) dev.RemoveFocus(s, f);
+            }
+            dev.UnspentAttributePoints = unspentAttr;
+            dev.UnspentFocusPoints = unspentFocus;
+        }
+
+        private void Abort()
+        {
+            _awaitingScreen = false;
+            try { _snapshot?.Restore(); }
+            catch (System.Exception ex) { TaleWorlds.Library.Debug.Print("[StatRespec] Restore failed: " + ex); }
+            _snapshot = null;
+            _activeHero = null;
+        }
+
+        /// Called every frame by SubModule.OnApplicationTick.
+        public void PollScreenClose()
+        {
+            if (!_awaitingScreen) return;
+            var gsm = Game.Current?.GameStateManager;
+            if (gsm == null) return;
+            bool isDeveloper = gsm.ActiveState is CharacterDeveloperState;
+            if (isDeveloper) { _screenSeen = true; return; }
+            if (_screenSeen)
+            {
+                _awaitingScreen = false;
+                OnScreenClosed();
+            }
+        }
+
+        // Filled in by Task 8:
+        private void OnScreenClosed() { }
     }
 }

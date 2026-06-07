@@ -27,6 +27,12 @@ namespace StatRespec
             }
         }
 
+        protected override void OnApplicationTick(float dt)
+        {
+            base.OnApplicationTick(dt);
+            StatRespec.Behaviors.StatRespecBehavior.Instance?.PollScreenClose();
+        }
+
         protected override void OnBeforeInitialModuleScreenSetAsRoot()
         {
             base.OnBeforeInitialModuleScreenSetAsRoot();
