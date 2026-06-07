@@ -17,6 +17,16 @@
 
 Project notes / контекст сессии: [docs/memory/project_bannerlord_tor.md](docs/memory/project_bannerlord_tor.md).
 
+### [`StatRespec/`](StatRespec/) — перераспределение атрибутов и фокусов
+
+Стандалон-мод без Harmony, патчей и новых данных в сейве:
+- Вход через `town_backstreet` → "Redistribute attributes & focus (10,000 denars)"
+- Сбрасывает атрибуты (до 2) и фокусы (до 0) выбранного героя, открывает нативный экран развития для перераспределения
+- Подрезает навыки до нового rate-based потолка (из активной `CharacterDevelopmentModel`), все перки сбрасываются
+- Cancel откатывает изменения без списания денег
+- Работает в ванилле и The Old Realms; TOR не требуется
+- Уровень и TotalXp героя сохраняются; сейв читается без мода
+
 ### [`AutoEquipCompanions/`](AutoEquipCompanions/) — кастомный форк AEC
 
 Форк [mwsaari/AutoEquipCompanions](https://github.com/mwsaari/AutoEquipCompanions) с TOR-специфичными правками:
@@ -34,6 +44,14 @@ Project notes / контекст сессии: [docs/memory/project_bannerlord_t
 Требования:
 - .NET SDK 8+
 - Bannerlord установлен где-то (по умолчанию `D:\SteamLibrary\steamapps\common\Mount & Blade II Bannerlord`)
+
+### StatRespec
+
+```bash
+dotnet build StatRespec/StatRespec.csproj -c Release
+```
+
+DLL деплоится в `<game>/Modules/StatRespec/`.
 
 ### TOR_QoLs
 
@@ -65,6 +83,7 @@ SandBoxCore
 Sandbox
 StoryMode
 CustomBattle
+StatRespec          # TOR не требуется
 TOR_Armory
 TOR_Environment
 TOR_Core
@@ -75,4 +94,5 @@ TOR_QoLs
 ## Лицензия
 
 - `TOR_QoLs/` — TBD
+- `StatRespec/` — TBD
 - `AutoEquipCompanions/` — наследует лицензию upstream (см. `AutoEquipCompanions/README.md`)
