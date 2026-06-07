@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>StatRespec.Tests</RootNamespace>
+    <AssemblyName>StatRespec.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <!-- Link pure helpers directly (repo convention) — no ProjectReference, so tests
+       don't depend on the deployed DLL that the running game locks. -->
+  <ItemGroup>
+    <Compile Include="..\StatRespec\Math\RespecMath.cs" Link="RespecMath.cs" />
+  </ItemGroup>
+
+</Project>
