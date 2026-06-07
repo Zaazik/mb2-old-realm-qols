@@ -195,7 +195,73 @@ namespace StatRespec.Behaviors
             }
         }
 
-        // Filled in by Task 8:
-        private void OnScreenClosed() { }
+        private void OnScreenClosed()
+        {
+            var hero = _activeHero;
+            if (hero == null) { _snapshot = null; return; }
+
+            var dev = hero.HeroDeveloper;
+            var model = Campaign.Current.Models.CharacterDevelopmentModel;
+
+            var trims = new List<(SkillObject skill, int from, int to)>();
+            foreach (var s in Skills.All)
+            {
+                int cur = hero.GetSkillValue(s);
+                int focus = dev.GetFocus(s);
+                int target = StatRespec.Math.RespecMath.TrimTarget(
+                    cur,
+                    v => model.CalculateLearningRate(hero.CharacterAttributes, focus, v, s, false).ResultNumber,
+                    1023);
+                if (target < cur) trims.Add((s, cur, target));
+            }
+
+            var body = new System.Text.StringBuilder();
+            if (trims.Count == 0)
+                body.AppendLine("No skills will be reduced.");
+            else
+            {
+                body.AppendLine("These skills exceed your new build and will be reduced:");
+                foreach (var t in trims) body.AppendLine($"  {t.skill.Name}: {t.from} -> {t.to}");
+            }
+            body.AppendLine();
+            body.AppendLine("All perks will be reset (re-pick them afterwards).");
+            body.AppendLine($"Cost: {RespecCost} denars.");
+
+            if (hero != Hero.MainHero
+                && CampaignOptions.AutoAllocateClanMemberPerks
+                && (dev.UnspentAttributePoints > 0 || dev.UnspentFocusPoints > 0))
+            {
+                body.AppendLine();
+                body.AppendLine($"Auto-allocation is ON: the game will distribute your unspent points "
+                    + $"({dev.UnspentAttributePoints} attribute / {dev.UnspentFocusPoints} focus) on its next daily tick.");
+            }
+
+            var trimsCopy = trims;
+            InformationManager.ShowInquiry(new InquiryData(
+                "Confirm respec", body.ToString(), true, true,
+                new TextObject("Confirm").ToString(), new TextObject("Cancel").ToString(),
+                () => Apply(hero, trimsCopy), () => Abort()), true);
+        }
+
+        private void Apply(Hero hero, List<(SkillObject skill, int from, int to)> trims)
+        {
+            try
+            {
+                var dev = hero.HeroDeveloper;
+                foreach (var t in trims) dev.SetInitialSkillLevel(t.skill, t.to);
+                hero.ClearPerks();
+                Hero.MainHero.ChangeHeroGold(-RespecCost);
+            }
+            catch (System.Exception ex)
+            {
+                TaleWorlds.Library.Debug.Print("[StatRespec] Apply failed: " + ex);
+                Abort();
+                return;
+            }
+            _snapshot = null;
+            _activeHero = null;
+            InformationManager.DisplayMessage(new InformationMessage(
+                $"{hero.Name} retrained.", Color.FromUint(0xFF00FF66u)));
+        }
     }
 }
