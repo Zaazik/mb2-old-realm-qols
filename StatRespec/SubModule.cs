@@ -1,4 +1,5 @@
 using StatRespec.Compat;
+using TaleWorlds.CampaignSystem;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
 using TaleWorlds.MountAndBlade;
@@ -13,6 +14,17 @@ namespace StatRespec
         {
             base.OnSubModuleLoad();
             CompatibilityCheck.Run();
+        }
+
+        protected override void OnGameStart(Game game, IGameStarter gameStarterObject)
+        {
+            base.OnGameStart(game, gameStarterObject);
+            if (CompatibilityCheck.IsCompatible
+                && game.GameType is Campaign
+                && gameStarterObject is CampaignGameStarter cgs)
+            {
+                cgs.AddBehavior(new StatRespec.Behaviors.StatRespecBehavior());
+            }
         }
 
         protected override void OnBeforeInitialModuleScreenSetAsRoot()
