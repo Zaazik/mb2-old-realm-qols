@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <AssemblyName>StatRespec</AssemblyName>
+    <RootNamespace>StatRespec</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <Deterministic>false</Deterministic>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+
+    <GameDir>D:\SteamLibrary\steamapps\common\Mount &amp; Blade II Bannerlord</GameDir>
+    <GameBin>$(GameDir)\bin\Win64_Shipping_Client</GameBin>
+    <ModuleDir>$(GameDir)\Modules\StatRespec</ModuleDir>
+    <OutputPath>$(ModuleDir)\bin\Win64_Shipping_Client\</OutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="TaleWorlds.Core"><HintPath>$(GameBin)\TaleWorlds.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="TaleWorlds.CampaignSystem"><HintPath>$(GameBin)\TaleWorlds.CampaignSystem.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="TaleWorlds.CampaignSystem.ViewModelCollection"><HintPath>$(GameBin)\TaleWorlds.CampaignSystem.ViewModelCollection.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="TaleWorlds.Core.ViewModelCollection"><HintPath>$(GameBin)\TaleWorlds.Core.ViewModelCollection.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="TaleWorlds.Library"><HintPath>$(GameBin)\TaleWorlds.Library.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="TaleWorlds.Localization"><HintPath>$(GameBin)\TaleWorlds.Localization.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="TaleWorlds.MountAndBlade"><HintPath>$(GameBin)\TaleWorlds.MountAndBlade.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="TaleWorlds.ObjectSystem"><HintPath>$(GameBin)\TaleWorlds.ObjectSystem.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="TaleWorlds.DotNet"><HintPath>$(GameBin)\TaleWorlds.DotNet.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="TaleWorlds.LinQuick"><HintPath>$(GameBin)\TaleWorlds.LinQuick.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <Target Name="CopySubModuleXml" AfterTargets="Build">
+    <Copy SourceFiles="SubModule.xml" DestinationFolder="$(ModuleDir)" />
+  </Target>
+
+</Project>

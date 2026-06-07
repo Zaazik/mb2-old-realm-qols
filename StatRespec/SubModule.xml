@@ -1,0 +1,21 @@
+<Module>
+  <Name value="StatRespec" />
+  <Id value="StatRespec" />
+  <Version value="v1.0.0" />
+  <SingleplayerModule value="true" />
+  <ModuleCategory value="Singleplayer" />
+  <DependedModules>
+    <DependedModule Id="Native" />
+    <DependedModule Id="SandBoxCore" />
+    <DependedModule Id="Sandbox" />
+    <DependedModule Id="StoryMode" />
+  </DependedModules>
+  <SubModules>
+    <SubModule>
+      <Name value="StatRespec" />
+      <DLLName value="StatRespec.dll" />
+      <SubModuleClassType value="StatRespec.SubModule" />
+      <Tags />
+    </SubModule>
+  </SubModules>
+</Module>
