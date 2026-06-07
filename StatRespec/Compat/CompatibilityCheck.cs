@@ -54,6 +54,7 @@ namespace StatRespec.Compat
             Method(typeof(CharacterDevelopmentModel), "CalculateLearningRate", typeof(ExplainedNumber),
                 typeof(IReadOnlyPropertyOwner<CharacterAttribute>), typeof(int), typeof(int), typeof(SkillObject), typeof(bool));
             Prop(typeof(Hero), "CharacterAttributes", typeof(IReadOnlyPropertyOwner<CharacterAttribute>), setter: false);
+            Prop(typeof(ExplainedNumber), "ResultNumber", typeof(float), setter: false);
             Prop(typeof(CampaignOptions), "AutoAllocateClanMemberPerks", typeof(bool), setter: false);
 
             Reason = sb.ToString();
