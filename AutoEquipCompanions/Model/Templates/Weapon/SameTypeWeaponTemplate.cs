@@ -1,4 +1,5 @@
 using AutoEquipCompanions.Model.Templates;
+using AutoEquipCompanions.Model.Templates.Shield;
 using System;
 using System.Collections.Generic;
 using TaleWorlds.CampaignSystem;
@@ -23,6 +24,16 @@ namespace AutoEquipCompanions.Model.Templates.Weapon
       public override double GetScore(EquipmentElement candidate)
       {
          if (candidate.IsEmpty) return 0;
+
+         // Special-case shields — для них scoring через EHP × coverage вместо ItemValue,
+         // иначе дорогие "ornate" щиты с маленьким length выигрывают у дешёвых широких.
+         if (candidate.Item.ItemType == ItemObject.ItemTypeEnum.Shield)
+         {
+            return EhpShieldScoring.Score(
+               candidate.GetModifiedMaximumHitPointsForUsage(0),
+               candidate.GetModifiedBodyArmor(),
+               candidate.Item.PrimaryWeapon.WeaponLength);
+         }
 
          // Базовый скор — ItemValue из BaseWeaponTemplate.
          double baseScore = base.GetScore(candidate);

@@ -122,6 +122,11 @@
       <HintPath>$(TORCoreBin)\TOR_Core.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- 0Harmony: только FileLog для диагностики, без патчей -->
+    <Reference Include="0Harmony">
+      <HintPath>$(TORCoreBin)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <!-- После билда копируем ассеты в Modules\AutoEquipCompanions\ -->

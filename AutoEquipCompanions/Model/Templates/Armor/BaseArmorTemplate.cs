@@ -33,6 +33,9 @@ namespace AutoEquipCompanions.Model.Templates.Armor
          if (MaxTier.HasValue && candidate.Item.Tier > MaxTier.Value)
             return false;
 
+         if (!RaceCompatibility.CanWear(candidate, hero))
+            return false;
+
          switch (slot)
          {
             case EquipmentIndex.Head: return candidate.Item.ItemType == ItemObject.ItemTypeEnum.HeadArmor;

@@ -11,6 +11,7 @@ using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.CampaignSystem.ViewModelCollection.Inventory;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
+using TOR_Core.Extensions;
 using TOR_QoLs.Behaviors;
 
 namespace TOR_QoLs.Patches
@@ -42,6 +43,8 @@ namespace TOR_QoLs.Patches
             AccessTools.Field(typeof(SPInventoryVM), "_currentCharacter");
         private static readonly MethodInfo RefreshInfoMethod =
             AccessTools.Method(typeof(SPInventoryVM), "RefreshInformationValues");
+        private static readonly MethodInfo LeftOwnerGoldGetter =
+            AccessTools.PropertyGetter(typeof(SPInventoryVM), "LeftInventoryOwnerGold");
 
         public static MethodBase TargetMethod()
         {
@@ -120,30 +123,52 @@ namespace TOR_QoLs.Patches
             var foodCandidates = new List<SPItemVM>();
             var nonFoodOther = new List<SPItemVM>();
 
+            int traitProtectedSkipped = 0;
             foreach (SPItemVM itemVM in vm.RightItemListVM)
             {
                 if (itemVM == null) continue;
                 if (itemVM.IsFiltered || itemVM.IsLocked || !itemVM.IsTransferable) continue;
                 var item = itemVM.ItemRosterElement.EquipmentElement.Item;
                 if (item == null) continue;
+
+                // Skip items с TOR ItemTraits (magic/legendary/named). Они ценны не по value,
+                // случайно продать — потеря. Игрок может явно unlock'нуть если хочет.
+                if (HasTorTraits(item))
+                {
+                    traitProtectedSkipped++;
+                    Diag($"  trait-protected skip: {item.StringId}");
+                    continue;
+                }
+
                 var hc = item.HorseComponent;
                 if (hc != null && !hc.IsLiveStock && hc.IsPackAnimal) { muleCandidates.Add(itemVM); continue; }
                 if (hc != null && !hc.IsLiveStock && hc.IsMount) { warhorseCandidates.Add(itemVM); continue; }
                 if (item.IsFood) { foodCandidates.Add(itemVM); continue; }
                 nonFoodOther.Add(itemVM);  // включает livestock, equipment, прочее
             }
+            if (traitProtectedSkipped > 0)
+                Diag($"  trait-protected total skipped: {traitProtectedSkipped}");
 
-            Diag($"  candidates: nonFood={nonFoodOther.Count} food={foodCandidates.Count} wh={warhorseCandidates.Count} mu={muleCandidates.Count}");
+            // Settlement gold budget — мы не продаём больше чем settlement может заплатить.
+            long remainingGold = (long)(int)(LeftOwnerGoldGetter?.Invoke(vm, null) ?? 0);
+            Diag($"  candidates: nonFood={nonFoodOther.Count} food={foodCandidates.Count} wh={warhorseCandidates.Count} mu={muleCandidates.Count} settlementGold={remainingGold}");
 
             var commands = new List<TransferCommand>();
 
-            // Non-food other (включая livestock): продаём всё unlocked.
-            foreach (var itemVM in nonFoodOther)
+            // Non-food other (включая livestock): продаём от самых ДЕШЁВЫХ,
+            // settlement gold cap'ит количество. Junk уходит, ценное остаётся если gold кончился.
+            var nonFoodByPrice = nonFoodOther
+                .Where(v => v.ItemRosterElement.Amount > 0)
+                .OrderBy(v => v.ItemCost)
+                .ToList();
+            foreach (var itemVM in nonFoodByPrice)
             {
+                if (remainingGold <= 0) break;
                 int amount = itemVM.ItemRosterElement.Amount;
-                if (amount <= 0) continue;
+                int sellCount = TraderMath.ComputeAffordable(amount, itemVM.ItemCost, ref remainingGold);
+                if (sellCount <= 0) continue;
                 commands.Add(TransferCommand.Transfer(
-                    amount,
+                    sellCount,
                     InventoryLogic.InventorySide.PlayerInventory,
                     InventoryLogic.InventorySide.OtherInventory,
                     itemVM.ItemRosterElement,
@@ -153,16 +178,18 @@ namespace TOR_QoLs.Patches
             // Food: оставить минимум requiredFood total, по 1 каждого вида для морал-diversity.
             int currentFoodTotal = foodCandidates.Sum(v => v.ItemRosterElement.Amount);
             int toSellFood = Math.Max(0, currentFoodTotal - requiredFood);
-            Diag($"  food: total={currentFoodTotal} required={requiredFood} toSell={toSellFood}");
-            if (toSellFood > 0)
+            Diag($"  food: total={currentFoodTotal} required={requiredFood} toSell={toSellFood} goldLeft={remainingGold}");
+            if (toSellFood > 0 && remainingGold > 0)
             {
-                var sortedFood = foodCandidates.OrderByDescending(v => v.ItemRosterElement.Amount).ToList();
+                // Cheapest first — junk food уходит первым, valuable провизия остаётся.
+                var sortedFood = foodCandidates.OrderBy(v => v.ItemCost).ToList();
                 foreach (var fitem in sortedFood)
                 {
-                    if (toSellFood <= 0) break;
+                    if (toSellFood <= 0 || remainingGold <= 0) break;
                     int amount = fitem.ItemRosterElement.Amount;
                     int maxSellable = Math.Max(0, amount - 1); // оставить 1 каждого типа
-                    int sellCount = Math.Min(maxSellable, toSellFood);
+                    int wantSell = Math.Min(maxSellable, toSellFood);
+                    int sellCount = TraderMath.ComputeAffordable(wantSell, fitem.ItemCost, ref remainingGold);
                     if (sellCount <= 0) continue;
                     commands.Add(TransferCommand.Transfer(
                         sellCount,
@@ -179,7 +206,7 @@ namespace TOR_QoLs.Patches
             int muLameSold = 0, muExpSold = 0;
 
             ProcessHorseCategory(warhorseCandidates, warhorsesNow, targetWarhorses,
-                settlement, currentChar, commands, ref whLameSold, ref whExpSold, "warhorses");
+                settlement, currentChar, commands, ref whLameSold, ref whExpSold, ref remainingGold, "warhorses");
 
             // Mule target — sweet-spot. Livestock после SellAll = 0 (продан в nonFoodOther).
             int warhorsesAfter = warhorsesNow - whLameSold - whExpSold;
@@ -187,10 +214,10 @@ namespace TOR_QoLs.Patches
             int desiredMules = TraderMath.DesiredMules(totalMen);
             int muleRoom = TraderMath.MuleRoom(totalMen, livestockNow: 0, excessWarhorses: excessWarhorsesAfter);
             int targetMules = TraderMath.TargetMules(desiredMules, muleRoom);
-            Diag($"  mule sweet-spot: whAfter={warhorsesAfter} excessWh={excessWarhorsesAfter} desired={desiredMules} room={muleRoom} → target={targetMules}");
+            Diag($"  mule sweet-spot: whAfter={warhorsesAfter} excessWh={excessWarhorsesAfter} desired={desiredMules} room={muleRoom} → target={targetMules} goldLeft={remainingGold}");
 
             ProcessHorseCategory(muleCandidates, mulesNow, targetMules,
-                settlement, currentChar, commands, ref muLameSold, ref muExpSold, "mules");
+                settlement, currentChar, commands, ref muLameSold, ref muExpSold, ref remainingGold, "mules");
 
             if (commands.Count == 0)
             {
@@ -223,11 +250,12 @@ namespace TOR_QoLs.Patches
 
         private static void ProcessHorseCategory(List<SPItemVM> candidates, int currentCount, int target,
             Settlement settlement, CharacterObject currentChar, List<TransferCommand> commands,
-            ref int lameSold, ref int expensiveSold, string label)
+            ref int lameSold, ref int expensiveSold, ref long remainingGold, string label)
         {
-            // Wave 1: all lame
+            // Wave 1: all lame — gold-cap'ит количество.
             foreach (var itemVM in candidates.ToList())
             {
+                if (remainingGold <= 0) break;
                 var rosterEl = itemVM.ItemRosterElement;
                 var element = rosterEl.EquipmentElement;
                 bool isLame = element.ItemModifier?.StringId == LameModifierId;
@@ -241,20 +269,21 @@ namespace TOR_QoLs.Patches
                 }
 
                 int amount = rosterEl.Amount;
-                if (amount <= 0) continue;
+                int sellNow = TraderMath.ComputeAffordable(amount, price, ref remainingGold);
+                if (sellNow <= 0) continue;
                 commands.Add(TransferCommand.Transfer(
-                    amount,
+                    sellNow,
                     InventoryLogic.InventorySide.PlayerInventory,
                     InventoryLogic.InventorySide.OtherInventory,
                     rosterEl,
                     EquipmentIndex.None, EquipmentIndex.None, currentChar));
-                lameSold += amount;
-                currentCount -= amount;
-                candidates.Remove(itemVM);
-                Diag($"  [{label}] wave1 sold {amount}× {element.Item.StringId} @ {price}");
+                lameSold += sellNow;
+                currentCount -= sellNow;
+                if (sellNow >= amount) candidates.Remove(itemVM);
+                Diag($"  [{label}] wave1 sold {sellNow}× {element.Item.StringId} @ {price}");
             }
 
-            // Wave 2: most expensive down to target
+            // Wave 2: cheapest non-lame первыми (junk уходит, лучших оставляем для боя).
             int excess = currentCount - target;
             if (excess <= 0)
             {
@@ -268,21 +297,21 @@ namespace TOR_QoLs.Patches
                     Vm = v,
                     Price = GetSellPrice(settlement, v.ItemRosterElement.EquipmentElement)
                 })
-                .OrderByDescending(x => x.Price)
+                .OrderBy(x => x.Price)
                 .ToList();
 
             foreach (var entry in sortedByPrice)
             {
-                if (excess <= 0) break;
+                if (excess <= 0 || remainingGold <= 0) break;
                 var rosterEl = entry.Vm.ItemRosterElement;
                 var element = rosterEl.EquipmentElement;
                 if (entry.Price < element.Item.Value * TraderMath.SellFloorWave2)
                 {
-                    Diag($"  [{label}] skip exp {element.Item.StringId}: price={entry.Price} < floor");
+                    Diag($"  [{label}] skip cheap {element.Item.StringId}: price={entry.Price} < floor");
                     continue;
                 }
-                int amount = rosterEl.Amount;
-                int sellNow = Math.Min(amount, excess);
+                int wantSell = Math.Min(rosterEl.Amount, excess);
+                int sellNow = TraderMath.ComputeAffordable(wantSell, entry.Price, ref remainingGold);
                 if (sellNow <= 0) continue;
                 commands.Add(TransferCommand.Transfer(
                     sellNow,
@@ -307,6 +336,25 @@ namespace TOR_QoLs.Patches
         {
             if (!Diagnostics) return;
             FileLog.Log("[SellAll] " + msg);
+        }
+
+        /// <summary>
+        /// True если у item есть TOR ItemTraits (magic/legendary/named bonuses).
+        /// Прямой call на TOR_Core extension — TOR обязателен для нашего мода.
+        /// </summary>
+        private static bool HasTorTraits(ItemObject item)
+        {
+            if (item == null) return false;
+            try
+            {
+                var traits = item.GetTraits();
+                return traits != null && traits.Count > 0;
+            }
+            catch (System.Exception ex)
+            {
+                FileLog.Log("[SellAll] HasTorTraits threw: " + ex.Message);
+                return false;
+            }
         }
     }
 

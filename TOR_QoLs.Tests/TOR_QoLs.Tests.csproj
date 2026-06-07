@@ -14,10 +14,11 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
 
-  <!-- Линкуем TraderMath напрямую — без ProjectReference на TOR_QoLs, чтобы тесты
+  <!-- Линкуем pure-helpers напрямую — без ProjectReference, чтобы тесты
        не зависели от deploy в Modules/ (когда игра запущена, файл DLL занят). -->
   <ItemGroup>
     <Compile Include="..\TOR_QoLs\Behaviors\TraderMath.cs" Link="TraderMath.cs" />
+    <Compile Include="..\AutoEquipCompanions\Model\Templates\Shield\EhpShieldScoring.cs" Link="EhpShieldScoring.cs" />
   </ItemGroup>
 
 </Project>

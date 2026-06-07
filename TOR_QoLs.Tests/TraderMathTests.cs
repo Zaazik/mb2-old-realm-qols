@@ -234,6 +234,73 @@ namespace TOR_QoLs.Tests
         }
     }
 
+    public class ComputeAffordableTests
+    {
+        [Fact]
+        public void AllAffordable_FullAmount_GoldDeducted()
+        {
+            long gold = 1000;
+            var result = TraderMath.ComputeAffordable(wantAmount: 5, unitPrice: 100, ref gold);
+            Assert.Equal(5, result);
+            Assert.Equal(500, gold);
+        }
+
+        [Fact]
+        public void NotEnoughGold_PartialAmount()
+        {
+            long gold = 250;
+            var result = TraderMath.ComputeAffordable(wantAmount: 10, unitPrice: 100, ref gold);
+            Assert.Equal(2, result);  // 250/100 = 2
+            Assert.Equal(50, gold);   // 250 - 200
+        }
+
+        [Fact]
+        public void ZeroGold_ReturnsZero()
+        {
+            long gold = 0;
+            var result = TraderMath.ComputeAffordable(wantAmount: 10, unitPrice: 50, ref gold);
+            Assert.Equal(0, result);
+            Assert.Equal(0, gold);
+        }
+
+        [Fact]
+        public void FreeItem_UnitPriceZero_FullAmount_NoGoldChange()
+        {
+            long gold = 100;
+            var result = TraderMath.ComputeAffordable(wantAmount: 20, unitPrice: 0, ref gold);
+            Assert.Equal(20, result);
+            Assert.Equal(100, gold);  // gold не списан для бесплатной передачи
+        }
+
+        [Fact]
+        public void NegativeWantAmount_ReturnsZero()
+        {
+            long gold = 1000;
+            var result = TraderMath.ComputeAffordable(wantAmount: -5, unitPrice: 10, ref gold);
+            Assert.Equal(0, result);
+            Assert.Equal(1000, gold);
+        }
+
+        [Fact]
+        public void UnitPriceTooHigh_ReturnsZero()
+        {
+            long gold = 99;
+            var result = TraderMath.ComputeAffordable(wantAmount: 5, unitPrice: 100, ref gold);
+            Assert.Equal(0, result);
+            Assert.Equal(99, gold);  // gold не списан
+        }
+
+        [Fact]
+        public void TorScenario_SettlementHas2000_Sell10AtPrice300()
+        {
+            // Реальный сценарий: settlement gold=2000, item 300g. Продастся 6 (1800g), останется 200g.
+            long gold = 2000;
+            var result = TraderMath.ComputeAffordable(wantAmount: 10, unitPrice: 300, ref gold);
+            Assert.Equal(6, result);
+            Assert.Equal(200, gold);
+        }
+    }
+
     public class SimulateLivestockBatchTests
     {
         [Fact]

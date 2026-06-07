@@ -78,12 +78,48 @@ namespace AutoEquipCompanions.Model
 
       private ItemRosterElement? GetBestReplacement(Hero hero, EquipmentIndex slot, ISlotTemplate template, EquipmentElement current)
       {
-         return Items
+         var allItems = Items.ToList();
+         var validItems = allItems
             .Where(x => template.IsValidFor(x.EquipmentElement, slot, hero))
-            .OrderByDescending(x => template.GetScore(x.EquipmentElement))
-            .TakeWhile(x => template.IsBetterThan(x.EquipmentElement, current))
+            .ToList();
+         // Composite sort: сначала race-specific armor (skeleton-skeleton, dwarf-dwarf и т.п.),
+         // потом лучшие по EHP. Чтобы skeleton companion получил skeleton armor даже если
+         // human-locked в инвентаре имеет чуть выше score.
+         var ordered = validItems
+            .OrderByDescending(x => Templates.RaceCompatibility.IsExactRaceMatch(x.EquipmentElement, hero) ? 1 : 0)
+            .ThenByDescending(x => template.GetScore(x.EquipmentElement))
+            .ToList();
+         HarmonyLib.FileLog.Log(
+            $"[AEC] {hero.Name} slot={slot} tmpl={template.Name} inv={allItems.Count} valid={validItems.Count} curEmpty={current.IsEmpty} curItem={current.Item?.StringId ?? "null"} curScore={template.GetScore(current):F2}");
+         if (ordered.Count > 0)
+         {
+            var top = ordered[0];
+            var topScore = template.GetScore(top.EquipmentElement);
+            var curScore = template.GetScore(current);
+            var isBetter = template.IsBetterThan(top.EquipmentElement, current);
+            HarmonyLib.FileLog.Log(
+               $"[AEC]   top={top.EquipmentElement.Item?.StringId} topScore={topScore:F2} curScore={curScore:F2} isBetter={isBetter}");
+         }
+         var best = ordered
+            .TakeWhile(x => IsBetterComposite(template, x.EquipmentElement, current, hero))
             .Cast<ItemRosterElement?>()
             .FirstOrDefault();
+         if (best.HasValue)
+            HarmonyLib.FileLog.Log($"[AEC]   → picked {best.Value.EquipmentElement.Item?.StringId}");
+         else if (ordered.Count > 0)
+            HarmonyLib.FileLog.Log($"[AEC]   → no pick (TakeWhile empty)");
+         return best;
+      }
+
+      // Composite compare: race-specific upgrade приоритет над EHP.
+      // Иначе TakeWhile отказался бы от skeleton armor когда у hero current=human armor с большим EHP.
+      private static bool IsBetterComposite(ISlotTemplate template, EquipmentElement candidate, EquipmentElement current, Hero hero)
+      {
+         var candMatch = Templates.RaceCompatibility.IsExactRaceMatch(candidate, hero);
+         var curMatch = Templates.RaceCompatibility.IsExactRaceMatch(current, hero);
+         if (candMatch && !curMatch) return true;   // race-specific upgrade
+         if (!candMatch && curMatch) return false;  // не downgrade в generic
+         return template.IsBetterThan(candidate, current);
       }
 
       private void DoEquip(Hero character, EquipmentIndex slot, ItemRosterElement replacement)

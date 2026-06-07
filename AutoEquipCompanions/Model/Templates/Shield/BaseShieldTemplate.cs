@@ -11,7 +11,8 @@ namespace AutoEquipCompanions.Model.Templates.Shield
       {
          Value,
          Armor,
-         HitPoints
+         HitPoints,
+         Ehp
       }
 
       public abstract ShieldField ComparisonField { get; }
@@ -48,8 +49,15 @@ namespace AutoEquipCompanions.Model.Templates.Shield
 
          switch (ComparisonField)
          {
-            case ShieldField.Armor: return candidate.Item.PrimaryWeapon.BodyArmor;
+            case ShieldField.Armor: return candidate.GetModifiedBodyArmor();
             case ShieldField.HitPoints: return candidate.GetModifiedMaximumHitPointsForUsage(0);
+            case ShieldField.Ehp:
+               // HP и armor — с учётом modifier (Legendary/Reinforced и т.п.).
+               // Length — physical параметр, modifier не применяется.
+               return EhpShieldScoring.Score(
+                  candidate.GetModifiedMaximumHitPointsForUsage(0),
+                  candidate.GetModifiedBodyArmor(),
+                  candidate.Item.PrimaryWeapon.WeaponLength);
             default: return candidate.ItemValue;
          }
       }

@@ -219,6 +219,25 @@ namespace TOR_QoLs.Behaviors
         }
 
         /// <summary>
+        /// Считает сколько единиц мы можем продать settlement'у с учётом его остатка
+        /// gold. Списывает с remainingGold. Если unitPrice ≤ 0 — продаём всё бесплатно
+        /// (vanilla branch для free transfer'ов).
+        ///
+        /// Возвращает количество, которое надо передать через TransferCommand.
+        /// </summary>
+        public static int ComputeAffordable(int wantAmount, int unitPrice, ref long remainingGold)
+        {
+            if (wantAmount <= 0) return 0;
+            if (unitPrice <= 0) return wantAmount;  // free transfer, gold не списывается
+            if (remainingGold <= 0) return 0;
+            long maxAfford = remainingGold / unitPrice;
+            if (maxAfford <= 0) return 0;
+            int result = (int)Math.Min((long)wantAmount, maxAfford);
+            remainingGold -= (long)unitPrice * result;
+            return result;
+        }
+
+        /// <summary>
         /// Симулирует обработку amount единиц livestock одного типа, разбивая на
         /// butcherCount + sellCount. Останавливается при первом SKIP. Возвращает
         /// результат батча + обновлённый remainingDeficit.
