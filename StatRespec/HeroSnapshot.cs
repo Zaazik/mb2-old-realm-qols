@@ -7,12 +7,13 @@ using TaleWorlds.Core;
 
 namespace StatRespec
 {
-    /// <summary>Pre-respec state of one hero, enough to fully roll back on cancel.</summary>
+    /// <summary>Pre-respec state of one hero, enough to fully roll back on cancel or a failed apply.</summary>
     public sealed class HeroSnapshot
     {
         private readonly Hero _hero;
         private readonly Dictionary<CharacterAttribute, int> _attributes = new Dictionary<CharacterAttribute, int>();
         private readonly Dictionary<SkillObject, int> _focus = new Dictionary<SkillObject, int>();
+        private readonly Dictionary<SkillObject, int> _skills = new Dictionary<SkillObject, int>();
         private readonly List<PerkObject> _perks = new List<PerkObject>();
         private readonly int _unspentAttr;
         private readonly int _unspentFocus;
@@ -23,6 +24,7 @@ namespace StatRespec
             var dev = hero.HeroDeveloper;
             foreach (var a in Attributes.All) _attributes[a] = hero.GetAttributeValue(a);
             foreach (var s in Skills.All) _focus[s] = dev.GetFocus(s);
+            foreach (var s in Skills.All) _skills[s] = hero.GetSkillValue(s);
             foreach (var p in PerkObject.All) if (hero.GetPerkValue(p)) _perks.Add(p);
             _unspentAttr = dev.UnspentAttributePoints;
             _unspentFocus = dev.UnspentFocusPoints;
@@ -46,6 +48,15 @@ namespace StatRespec
                 int cur = dev.GetFocus(kv.Key);
                 if (cur > 0) dev.RemoveFocus(kv.Key, cur);
                 if (kv.Value > 0) dev.AddFocus(kv.Key, kv.Value, false);
+            }
+
+            // Restore only skills that actually changed (a failed Apply trimmed some). On the
+            // normal cancel path nothing was touched, so every value matches and this is a no-op,
+            // preserving within-level skill XP exactly as before.
+            foreach (var kv in _skills)
+            {
+                if (_hero.GetSkillValue(kv.Key) != kv.Value)
+                    dev.SetInitialSkillLevel(kv.Key, kv.Value);
             }
 
             _hero.ClearPerks();

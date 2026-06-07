@@ -129,6 +129,7 @@ namespace StatRespec.Behaviors
 
         private void StartRespec(Hero hero)
         {
+            if (_awaitingScreen) return;
             try
             {
                 _snapshot = HeroSnapshot.Capture(hero);
@@ -186,8 +187,11 @@ namespace StatRespec.Behaviors
             if (!_awaitingScreen) return;
             var gsm = Game.Current?.GameStateManager;
             if (gsm == null) return;
-            bool isDeveloper = gsm.ActiveState is CharacterDeveloperState;
-            if (isDeveloper) { _screenSeen = true; return; }
+            // Detect by STACK MEMBERSHIP, not topmost: the developer screen can push sub-screens
+            // (banner editor, party screen) on top of itself; treating "not topmost" as "closed"
+            // would fire the confirm prematurely. Closed = the state is gone from the stack.
+            bool developerOnStack = gsm.GameStates.Any(s => s is CharacterDeveloperState);
+            if (developerOnStack) { _screenSeen = true; return; }
             if (_screenSeen)
             {
                 _awaitingScreen = false;
@@ -200,47 +204,58 @@ namespace StatRespec.Behaviors
             var hero = _activeHero;
             if (hero == null) { _snapshot = null; return; }
 
-            var dev = hero.HeroDeveloper;
-            var model = Campaign.Current.Models.CharacterDevelopmentModel;
-
-            var trims = new List<(SkillObject skill, int from, int to)>();
-            foreach (var s in Skills.All)
+            try
             {
-                int cur = hero.GetSkillValue(s);
-                int focus = dev.GetFocus(s);
-                int target = StatRespec.Math.RespecMath.TrimTarget(
-                    cur,
-                    v => model.CalculateLearningRate(hero.CharacterAttributes, focus, v, s, false).ResultNumber,
-                    1023);
-                if (target < cur) trims.Add((s, cur, target));
-            }
+                var dev = hero.HeroDeveloper;
+                var model = Campaign.Current.Models.CharacterDevelopmentModel;
 
-            var body = new System.Text.StringBuilder();
-            if (trims.Count == 0)
-                body.AppendLine("No skills will be reduced.");
-            else
-            {
-                body.AppendLine("These skills exceed your new build and will be reduced:");
-                foreach (var t in trims) body.AppendLine($"  {t.skill.Name}: {t.from} -> {t.to}");
-            }
-            body.AppendLine();
-            body.AppendLine("All perks will be reset (re-pick them afterwards).");
-            body.AppendLine($"Cost: {RespecCost} denars.");
+                var trims = new List<(SkillObject skill, int from, int to)>();
+                foreach (var s in Skills.All)
+                {
+                    int cur = hero.GetSkillValue(s);
+                    int focus = dev.GetFocus(s);
+                    int target = StatRespec.Math.RespecMath.TrimTarget(
+                        cur,
+                        v => model.CalculateLearningRate(hero.CharacterAttributes, focus, v, s, false).ResultNumber,
+                        1023);
+                    if (target < cur) trims.Add((s, cur, target));
+                }
 
-            if (hero != Hero.MainHero
-                && CampaignOptions.AutoAllocateClanMemberPerks
-                && (dev.UnspentAttributePoints > 0 || dev.UnspentFocusPoints > 0))
-            {
+                var body = new System.Text.StringBuilder();
+                if (trims.Count == 0)
+                    body.AppendLine("No skills will be reduced.");
+                else
+                {
+                    body.AppendLine("These skills exceed your new build and will be reduced:");
+                    foreach (var t in trims) body.AppendLine($"  {t.skill.Name}: {t.from} -> {t.to}");
+                }
                 body.AppendLine();
-                body.AppendLine($"Auto-allocation is ON: the game will distribute your unspent points "
-                    + $"({dev.UnspentAttributePoints} attribute / {dev.UnspentFocusPoints} focus) on its next daily tick.");
-            }
+                body.AppendLine("All perks will be reset (re-pick them afterwards).");
+                body.AppendLine($"Cost: {RespecCost} denars.");
 
-            var trimsCopy = trims;
-            InformationManager.ShowInquiry(new InquiryData(
-                "Confirm respec", body.ToString(), true, true,
-                new TextObject("Confirm").ToString(), new TextObject("Cancel").ToString(),
-                () => Apply(hero, trimsCopy), () => Abort()), true);
+                if (hero != Hero.MainHero
+                    && CampaignOptions.AutoAllocateClanMemberPerks
+                    && (dev.UnspentAttributePoints > 0 || dev.UnspentFocusPoints > 0))
+                {
+                    body.AppendLine();
+                    body.AppendLine($"Auto-allocation is ON: the game will distribute your unspent points "
+                        + $"({dev.UnspentAttributePoints} attribute / {dev.UnspentFocusPoints} focus) on its next daily tick.");
+                }
+
+                var trimsCopy = trims;
+                InformationManager.ShowInquiry(new InquiryData(
+                    "Confirm respec", body.ToString(), true, true,
+                    new TextObject("Confirm").ToString(), new TextObject("Cancel").ToString(),
+                    () => Apply(hero, trimsCopy), () => Abort()), true);
+            }
+            catch (System.Exception ex)
+            {
+                // R10: the trim/summary boundary runs from the tick poll. Any failure here
+                // (e.g. a polymorphic-model quirk) must log + fully roll back the reset hero,
+                // never leave them half-reset. Gold is only charged in Apply, so none is charged.
+                TaleWorlds.Library.Debug.Print("[StatRespec] OnScreenClosed failed: " + ex);
+                Abort();
+            }
         }
 
         private void Apply(Hero hero, List<(SkillObject skill, int from, int to)> trims)

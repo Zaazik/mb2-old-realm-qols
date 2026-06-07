@@ -19,8 +19,10 @@ namespace StatRespec
         protected override void OnGameStart(Game game, IGameStarter gameStarterObject)
         {
             base.OnGameStart(game, gameStarterObject);
-            if (CompatibilityCheck.IsCompatible
-                && game.GameType is Campaign
+            // Register even when incompatible: the menu option then appears greyed with an
+            // "incompatible" tooltip (handled in EntryCondition), matching the spec. A disabled
+            // option can't start the flow, so a drifted member is never actually called.
+            if (game.GameType is Campaign
                 && gameStarterObject is CampaignGameStarter cgs)
             {
                 cgs.AddBehavior(new StatRespec.Behaviors.StatRespecBehavior());

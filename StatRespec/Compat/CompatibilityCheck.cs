@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.CharacterDevelopment;
+using TaleWorlds.CampaignSystem.ComponentInterfaces;
 using TaleWorlds.Core;
 
 namespace StatRespec.Compat
@@ -46,6 +47,14 @@ namespace StatRespec.Compat
             Method(typeof(HeroDeveloper), "SetInitialSkillLevel", typeof(void), typeof(SkillObject), typeof(int));
             Prop(typeof(HeroDeveloper), "UnspentAttributePoints", typeof(int), setter: true);
             Prop(typeof(HeroDeveloper), "UnspentFocusPoints", typeof(int), setter: true);
+
+            // Trim path: the most version-fragile call (the active CharacterDevelopmentModel,
+            // overridden by TOR) plus the members it reads. Guarding these greys the menu on a
+            // future drift instead of resetting the hero and then throwing mid-flow.
+            Method(typeof(CharacterDevelopmentModel), "CalculateLearningRate", typeof(ExplainedNumber),
+                typeof(IReadOnlyPropertyOwner<CharacterAttribute>), typeof(int), typeof(int), typeof(SkillObject), typeof(bool));
+            Prop(typeof(Hero), "CharacterAttributes", typeof(IReadOnlyPropertyOwner<CharacterAttribute>), setter: false);
+            Prop(typeof(CampaignOptions), "AutoAllocateClanMemberPerks", typeof(bool), setter: false);
 
             Reason = sb.ToString();
             IsCompatible = Reason.Length == 0;
