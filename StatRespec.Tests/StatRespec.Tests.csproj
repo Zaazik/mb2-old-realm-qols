@@ -18,6 +18,7 @@
        don't depend on the deployed DLL that the running game locks. -->
   <ItemGroup>
     <Compile Include="..\StatRespec\Math\RespecMath.cs" Link="RespecMath.cs" />
+    <Compile Include="..\StatRespec\Compat\SignatureCheck.cs" Link="SignatureCheck.cs" />
   </ItemGroup>
 
 </Project>
